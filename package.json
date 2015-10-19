@@ -1,0 +1,22 @@
+{
+  "name": "redux-render",
+  "version": "0.1.0",
+  "author": "Izaak Schroeder <izaak.schroeder@gmail.com>",
+  "license": "CC0-1.0",
+  "repository": "izaakschroeder/redux-render",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "prepublish": "./node_modules/.bin/babel -s inline -d dist/src src/"
+  },
+  "dependencies": {
+    "is-promise": "^2.1.0"
+  },
+  "peerDependencies": {
+    "react-dom": ">=0.14.0",
+    "react": ">=0.14.0",
+    "redux": ">=2.0.0"
+  },
+  "devDependencies": {
+    "babel": "^5.8.23"
+  }
+}
