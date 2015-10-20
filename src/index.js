@@ -1,60 +1,75 @@
 import { renderToString } from 'react-dom/server';
 import isPromise from 'is-promise';
+import { compose, createStore, applyMiddleware } from 'redux';
+import { isFSA } from 'flux-standard-action';
 
-function wait(element : Element) {
+export class ReduxRender {
 
-  const store = element.props.store;
+  promises = [];
 
-  return new Promise((resolve, reject) => {
-    function done() {
-      if (--pending <= 0) {
-        store.dispatch = store._dispatch;
-        delete store._dispatch;
-        resolve({ waited, markup });
+  createStore({ middleware = [], reducer = {}, state = {} } = {}) {
+    return compose.apply(null,
+      [applyMiddleware(this.promiseMiddleware)].concat(middleware)
+    )(createStore)(reducer, state);
+  }
+
+  consumePromises() {
+    const _promises = this.promises;
+    this.promises = [];
+    return _promises;
+  }
+
+  storePromise(promise) {
+    this.promises.push(promise);
+    return promise;
+  }
+
+  then = (handler) => {
+    return Promise.all(this.consumePromises())
+      .then(actions => ({
+        actions,
+        state: this.getReduxState()
+      })).then(handler);
+  }
+
+  promiseMiddleware = ({ dispatch, getState }) => {
+    this.getReduxState = getState;
+
+    return next => action => {
+
+      if (!isFSA(action)) {
+        if (isPromise(action)) {
+          return this.storePromise(action.then(dispatch));
+        }
       }
-    }
 
-    const promises = [ ];
-    let pending = 0;
-    let waited = false;
-    let markup = '';
-
-    store._dispatch = store.dispatch;
-    store.dispatch = (...args) => {
-      ++pending;
-      const result = store._dispatch(...args);
-      if (isPromise(result)) {
-        waited = true;
-        promises.push(result);
-      } else {
-        done();
+      if (isPromise(action.payload)) {
+        return this.storePromise(action.payload.then(
+          result => dispatch({ ...action, payload: result }),
+          error => dispatch({ ...action, payload: error, error: true })
+        ));
       }
-    }
-    markup = renderToString(element);
-    promises.forEach(promise => promise.then(done, done));
-  });
 
+      return next(action);
+    }
+  }
+
+  renderToString = (element, count = 5) => {
+    const markup = renderToString(element);
+
+    return this.then(({ actions, state }) => {
+
+      // TODO: Check action payloads for redirects and errors.
+
+      if (!actions.length || --count === 0 ) {
+        return { markup, state };
+      }
+
+      return this.renderToString(element, count)
+    });
+  }
 }
 
-function render(element : Element, count = 0) : Promise {
-  return wait(element).then(({ waited, markup }) => {
-    if (!waited || count > 5) {
-      return Promise.resolve({ markup, count });
-    }
-    return render(element, count + 1);
-  });
-}
-
-/**
- * Render a redux container.
- * @param {Element} container Redux container to render.
- * @returns {Promise} Promise containing render result.
- */
-export default function(container : Element) : Promise {
-  return new Promise((resolve, reject) => {
-    if (!container || !container.props || !container.props.store) {
-      return reject(new Error('Container must have a valid redux store.'));
-    }
-    return render(container.props.store)
-  });
+export default function() {
+  return new ReduxRender();
 }
