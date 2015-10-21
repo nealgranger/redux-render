@@ -13,13 +13,8 @@ export function createRender(render) {
     // Collect any promises that were created by actions.
     const promises = store.clearPromises();
 
-    let status = 200;
-
     // Await the fulfillment of all promise actions or the fist rejection
     return Promise.all(promises).then(actions => {
-      // TODO: Check action payloads for redirects.
-
-      const state = store.getState();
 
       if (!actions.length || additionalRenders < 0 ) {
         if (additionalRenders < 0 && actions.length ) {
@@ -27,7 +22,7 @@ export function createRender(render) {
             higher value for the \`additionalRenders\` parameter or reduce the
             depth of async action creators.`);
         }
-        return { markup, state, status };
+        return markup;
       }
 
       return interate(element, store, additionalRenders);
