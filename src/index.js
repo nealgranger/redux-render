@@ -1,60 +1,70 @@
-import { renderToString } from 'react-dom/server';
+import {
+  renderToString as reactRenderToString,
+  renderToStaticMarkup as reactRenderToStaticMarkup,
+} from 'react-dom/server';
+
 import isPromise from 'is-promise';
 
-function wait(element : Element) {
+export function createRender(render) {
+  return function interate(element, store, additionalRenders = 1) {
+    additionalRenders = additionalRenders - 1;
+    // Call render to create any actions within components at mount.
+    const markup = render(element);
+    // Collect any promises that were created by actions.
+    const promises = store.clearPromises();
 
-  const store = element.props.store;
+    let status = 200;
 
-  return new Promise((resolve, reject) => {
-    function done() {
-      if (--pending <= 0) {
-        store.dispatch = store._dispatch;
-        delete store._dispatch;
-        resolve({ waited, markup });
+    // Await the fulfillment of all promise actions or the fist rejection
+    return Promise.all(promises).then(actions => {
+      // TODO: Check action payloads for redirects.
+
+      const state = store.getState();
+
+      if (!actions.length || additionalRenders < 0 ) {
+        if (additionalRenders < 0 && actions.length ) {
+          console.warn(`Render completed with unresolved promises. Specify a
+            higher value for the \`additionalRenders\` parameter or reduce the
+            depth of async action creators.`);
+        }
+        return { markup, state, status };
       }
-    }
 
-    const promises = [ ];
-    let pending = 0;
-    let waited = false;
-    let markup = '';
-
-    store._dispatch = store.dispatch;
-    store.dispatch = (...args) => {
-      ++pending;
-      const result = store._dispatch(...args);
-      if (isPromise(result)) {
-        waited = true;
-        promises.push(result);
-      } else {
-        done();
-      }
-    }
-    markup = renderToString(element);
-    promises.forEach(promise => promise.then(done, done));
-  });
-
+      return interate(element, store, additionalRenders);
+    });
+  };
 }
 
-function render(element : Element, count = 0) : Promise {
-  return wait(element).then(({ waited, markup }) => {
-    if (!waited || count > 5) {
-      return Promise.resolve({ markup, count });
-    }
-    return render(element, count + 1);
-  });
+export const renderToString = createRender(reactRenderToString);
+export const renderToStaticMarkup = createRender(reactRenderToStaticMarkup);
+
+function appendPromise(promises, action) {
+  if (action.payload && isPromise(action.payload)) {
+    promises = promises.concat([action.payload]);
+  }
+  return promises;
 }
 
-/**
- * Render a redux container.
- * @param {Element} container Redux container to render.
- * @returns {Promise} Promise containing render result.
- */
-export default function(container : Element) : Promise {
-  return new Promise((resolve, reject) => {
-    if (!container || !container.props || !container.props.store) {
-      return reject(new Error('Container must have a valid redux store.'));
-    }
-    return render(container.props.store)
-  });
+export function renderEnhancer() {
+  return next => (reducer, initialState) => {
+    const store = next(reducer, initialState);
+
+    let promises = [];
+
+    return {
+      ...store,
+      getPromises() {
+        return promises;
+      },
+      clearPromises() {
+        let temp = promises;
+        promises = [];
+        return temp;
+      },
+      dispatch(action) {
+        promises = appendPromise(promises, action);
+        return store.dispatch(action);
+      },
+    };
+  }
 }
