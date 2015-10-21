@@ -1,88 +1,69 @@
-import { renderToString as render } from 'react-dom/server';
-import { isFSA } from 'flux-standard-action';
+import {
+  renderToString as reactRenderToString,
+  renderToStaticMarkup as reactRenderToStaticMarkup,
+} from 'react-dom/server';
+
 import isPromise from 'is-promise';
 
-export default function renderToString(element, store, count = 5) {
-  console.log('render ', count);
+function createRender(render) {
+  return function interate(element, store, additionalRenders = 1) {
+    additionalRenders = additionalRenders - 1;
+    // Call render to create any actions within components at mount.
+    const markup = render(element);
+    // Collect any promises that were created by actions.
+    const promises = store.clearPromises();
 
-  const markup = render(element);
+    let status = 200;
 
-  return Promise.all(store.renderStore.getState().promises).then(actions => {
-    // TODO: Reset the list of promises.
-    // TODO: Check action payloads for redirects and errors.
+    // Await the fulfillment of all promise actions or the fist rejection
+    return Promise.all(promises).then(actions => {
+      // TODO: Check action payloads for redirects.
 
-    if (!actions.length || --count === 0 ) {
-      const status = 200;
+      // Get the store state after the pending promises have resolved.
       const state = store.getState();
-      return { markup, state, status };
-    }
 
-    return this.renderToString(element, count)
-  });
+      if (!actions.length || additionalRenders < 0 ) {
+        if (additionalRenders < 0 && actions.length ) {
+          console.warn('renderToString was not able to ');
+        }
+        return { markup, state, status };
+      }
+
+      return interate(element, store, additionalRenders)
+    });
+  };
 }
 
+export const renderToString = createRender(reactRenderToString);
+export const renderToStaticMarkup = createRender(reactRenderToStaticMarkup);
+
 function appendPromise(promises, action) {
-  if (!isFSA(action)) {
-    if (isPromise(action)) {
-      return promises.concat([action]);
-    }
+  if (action.payload && isPromise(action.payload)) {
+    promises = promises.concat([action.payload]);
   }
-
-  if (isPromise(action.payload)) {
-    return promises.concat([action]);
-  }
-
   return promises;
 }
 
-function liftReducer(reducer, initialState) {
-  const initialLiftedState = {
-    storeState: initialState,
-    promises: []
-  };
-
-  return function liftedReducer(liftedState = initialLiftedState, action) {
-    let {
-      storeState,
-      promises
-    } = liftedState;
-    
-    promises = appendPromise(promises, action);
-    storeState = reducer(storeState, action);
-
-    return  {
-      storeState,
-      promises
-    }
-  }
-}
-
-function unliftState(liftedState) {
-  return liftedState.storeState;
-}
-
-function unliftStore(liftedStore, reducer) {
-  return {
-    ...liftedStore,
-    renderStore: liftedStore,
-    getState() {
-      const state = unliftState(liftedStore.getState());
-      return state;
-    },
-    getReducer() {
-      return reducer;
-    },
-    replaceReducer(nextReducer) {
-      liftedStore.replaceReducer(liftReducer(nextReducer));
-    }
-  }
-}
-
-export function renderMiddleware() {
+export function renderEnhancer() {
   return next => (reducer, initialState) => {
-    const liftedReducer = liftReducer(reducer, initialState);
-    const liftedStore = next(liftedReducer);
-    const store = unliftStore(liftedStore, reducer);
-    return store;
+    const store = next(reducer, initialState);
+
+    let promises = [];
+
+    return {
+      ...store,
+      getPromises() {
+        return promises;
+      },
+      clearPromises() {
+        let temp = promises;
+        promises = [];
+        return temp;
+      },
+      dispatch(action) {
+        promises = appendPromise(promises, action);
+        return store.dispatch(action);
+      }
+    };
   }
 }
