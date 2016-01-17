@@ -4,19 +4,23 @@
   "author": "Izaak Schroeder <izaak.schroeder@gmail.com>",
   "license": "CC0-1.0",
   "repository": "izaakschroeder/redux-render",
-  "main": "dist/src/index.js",
   "scripts": {
-    "prepublish": "./node_modules/.bin/babel -s inline -d dist/src src/"
+    "compile": "./node_modules/.bin/babel -s inline -d . src/",
+    "prepiblish": "npm run compile",
+    "dev": "npm run compile -- -w"
   },
   "dependencies": {
-    "is-promise": "^2.1.0"
-  },
-  "peerDependencies": {
-    "react-dom": ">=0.14.0",
-    "react": ">=0.14.0",
-    "redux": ">=2.0.0"
+    "is-promise": "^2.1.0",
+    "redux-lift": "^0.1.3"
   },
   "devDependencies": {
-    "babel": "^5.8.23"
+    "babel-cli": "^6.4.0",
+    "babel-core": "^6.3.26",
+    "babel-preset-metalab": "^0.1.2",
+    "eslint": "^1.10.3",
+    "eslint-config-metalab": "^1.0.0-rc.4",
+    "eslint-plugin-filenames": "^0.2.0",
+    "eslint-plugin-import": "^0.11.0",
+    "eslint-plugin-react": "^3.15.0"
   }
 }
