@@ -1,61 +1,111 @@
-import { unliftAction, liftAction, lift } from 'redux-lift';
+import { liftAction, unliftAction, lift } from 'redux-lift';
 import isPromise from 'is-promise';
 
-import { ADD_PROMISE, CLEAR_PROMISES, PASS_THROUGH } from './action-types';
+import { PASS_THROUGH } from './action-types';
+import { addPromise } from './actions';
+import waitReducer from './reducer';
 
-import { addPromise } from './actions.js';
+/**
+ * Compose a child state and a `redux-wait` state into a single state object.
+ *
+ * @function
+ * @param   {Object} childState The child store state
+ * @param   {Object} waitState  The `redux-wait` store state.
+ * @returns {Object}            The composed state.
+ */
+export const composeState = (childState, waitState = { promises: [] }) => ({
+  childState,
+  waitState,
+});
 
-const liftState = (child, render = { promises: [] }) => [ child, render ];
+/**
+ * Extract the child store state from a composed state object.
+ *
+ * @function
+ * @param   {Object} composedState The composed state.
+ * @returns {Object}              The child store state.
+ */
+export const extractChildState = ({ childState }) => childState;
 
-const unliftState = ([ child ]) =>  child;
+/**
+ * Extract the `redux-wait` state from a composed state object.
+ *
+ * @function
+ * @param   {Object} composedState The composed state.
+ * @returns {Object}               The `redux-wait` state.
+ */
+export const extractWaitState = ({ waitState }) => waitState;
 
-const getState = ([ , render ]) =>  render;
+/**
+ * Update the `redux-wait` state.
+ *
+ * @function
+ * @param   {Object} composedState The composed state.
+ * @param   {Object} waitState The new `redux-wait` state
+ * @returns {Object}            The composed, updated state.
+ */
+export const updateState = (composedState, waitState) => composeState(
+  extractChildState(composedState),
+  waitState,
+);
 
-export const getPromises = (state) => getState(state).promises;
-
-const updateState = (state, render) => liftState(unliftState(state), render);
-
-const liftReducer = (reducer) => {
+/**
+ * Create a `reducer` function lifter.
+ *
+ * @function
+ * @param   {Function} waitReducer The `redux-wait` state reducer.
+ * @returns {Function}             A function that lifts a `reducer` function.
+ */
+export const createLiftReducer = (waitReducer) => (reducer) => {
   const map = {
-    [PASS_THROUGH]: (state, action) => {
-      return liftState(
-        reducer(unliftState(state), unliftAction(action)),
-        getState(state)
-      );
-    },
-    [ADD_PROMISE]: (state, { payload }) => {
-      const currentState = getState(state);
-      const { promises } = currentState;
-      return updateState(state, {
-        ...currentState,
-        promises: [ ...promises, payload ],
-      });
-    },
-    [CLEAR_PROMISES]: (state) => {
-      const currentState = getState(state);
-      return updateState(state, {
-        ...currentState,
-        promises: [],
-      });
-    },
-    default: (state) => state,
+    [PASS_THROUGH]: (state, action) => composeState(
+      reducer(extractChildState(state), unliftAction(action)),
+      extractWaitState(state)
+    ),
+    default: (state, action) => composeState(
+      reducer(extractChildState(state), action),
+      extractWaitState(state)
+    ),
   };
 
-  return (state, action) => (map[action.type] || map.default)(state, action);
+  return (state, action) => {
+    // run wait reducer
+    const reducedState = waitReducer(extractWaitState(state), action);
+    const composedState = composeState(extractChildState(state), reducedState);
+
+    return (map[action.type] || map.default)(composedState, action);
+  };
 };
 
-const liftDispatch = (dispatch) => (action) => {
-  console.log("top level dispatch", action);
-  if (isPromise(action.payload)) {
-    dispatch(addPromise(action.payload));
+/**
+ * Create dispatch function lifter.
+ *
+ * @function
+ * @param   {Function} handleAction Callback `({Object}) => {Promise}`.
+ * @returns {Function}              A function that lifts a `dispatch` function.
+ */
+const createLiftDispatch = (handleAction) => (dispatch) => (action) => {
+  const promise = handleAction(action);
+
+  if (isPromise(promise)) {
+    dispatch(addPromise(promise));
   }
 
   dispatch(liftAction(PASS_THROUGH, action));
+
+  return action;
 };
 
-export default lift({
-  liftReducer,
-  liftState,
-  unliftState,
-  liftDispatch,
+/**
+ * Create a `redux-wait` store enhancer.
+ *
+ * @function
+ * @param   {Function} options.handleAction Callback `({Object}) => {Promise}`.
+ * @returns {Function}                      A Redux store enhancer.
+ */
+export default ({ handleAction = ({ payload }) => payload } = {}) => lift({
+  liftReducer: createLiftReducer(waitReducer),
+  liftState: composeState,
+  unliftState: extractChildState,
+  liftDispatch: createLiftDispatch(handleAction),
 });
