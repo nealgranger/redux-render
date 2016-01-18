@@ -2,7 +2,7 @@ import { clearPromises } from './actions';
 import { extractWaitState } from './enhancer';
 
 /**
- * Create a function that awaits all promises in the `redux-render` store.
+ * Create a function that awaits all promises in the `redux-wait` store.
  *
  * @function
  * @param   {Function} callback              A callback function.
